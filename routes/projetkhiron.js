@@ -52,20 +52,120 @@ const userAccessAuthorized = (req) => {
     })
 }
 
+const getSiteDetailsSiteID = (siteID) => {
+    return new Promise((resolve, reject) => {
+        const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+        let searchID = new ObjectID(siteID);
+        client.connect().then(value => {
+            client.db("projetkhiron").collection("sites").find({_id:searchID}).toArray(function (err2, result) {
+                if (err2) {
+                    console.log("ERROR in get /getSiteDetailsSiteID mongodb find");
+                    console.log(err2.message, err2.code);
+                    reject(err2);
+                } else {
+                    resolve(result[0]);
+                }
+                client.close();
+            });
+        }).catch(err => {
+            console.log("ERROR in get /getSiteDetailsSiteID mongodb connect");
+            console.log(err.message, err.code);
+            reject(err);
+        });
+    });
+}
 /* GET users listing. */
 router.get('/accounts', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+            
+            let query = {"sites._id":siteDetails._id.toString()};
 
-            let query = {};
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                query = { tenant: req.headers.tenant };
-            }
+            client.connect(err => {
+                if (err) {
+                    client.close();
+                    console.log("ERROR in get /accounts mongodb connect");
+                    console.log(err.message, err.code);
+                    res.status(500);
+                    res.render('error', { error: err });
+                    return;
+                }
+                client.db("projetkhiron").collection("accounts").find(query).toArray(function (err2, result) {
+                    if (err2) {
+                        console.log("ERROR in get /accounts mongodb find");
+                        console.log(err2.message, err2.code);
+                        res.status(500);
+                        res.render('error', { error: err2 });
+                    } else {
+                        res.json(result);
+                    }
+                    client.close();
+                });
+            });
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        })
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
+    })
+});
 
-            if (req.query.email && req.query.email.trim().length > 0) {
-                query = { ...query, email: req.query.email.trim() };
-            }
+router.get('/accounts/:role', function (req, res, next) {
+    userAccessAuthorized(req).then(isAuthorized => {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
+            const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+            client.connect(err => {
+                if (err) {
+                    client.close();
+                    console.log("ERROR in get /accounts/:role mongodb connect");
+                    console.log(err.message, err.code);
+                    res.status(500);
+                    res.render('error', { error: err });
+                    return;
+                }
+                let query = { "role.name": req.params.role , "sites._id": siteDetails._id.toString()};
+
+                client.db("projetkhiron").collection("accounts").find(query).toArray()
+                    .then(accounts => {
+                        if (accounts)
+                            res.json(accounts);
+                        else
+                            res.json([]);
+                    })
+                    .catch(error => {
+                        console.log("ERROR in get /accounts/:role mongodb find");
+                        console.log(error.message, error.code);
+                        res.status(500);
+                        res.render('error', { error: error });
+                    })
+                    .finally(() => {
+                        client.close();
+                    });
+            });
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        })
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
+    })
+});
+
+router.get('/account', function (req, res, next) {
+    userAccessAuthorized(req).then(isAuthorized => {
+        const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+        let query = {};
+
+        if (req.query.email && req.query.email.trim().length > 0) {
+            query = { ...query, email: req.query.email.trim() };
 
             client.connect(err => {
                 if (err) {
@@ -89,42 +189,92 @@ router.get('/accounts', function (req, res, next) {
                 });
             });
         } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
+            console.log("ERROR in get /account, missing parameters")
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
         }
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
-router.get('/accounts/:role', function (req, res, next) {
+router.put('/account', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
-            const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-            client.connect(err => {
-                if (err) {
-                    client.close();
-                    console.log("ERROR in get /accounts/:role mongodb connect");
-                    console.log(err.message, err.code);
-                    res.status(500);
-                    res.render('error', { error: err });
-                    return;
-                }
-                let query = { "role.name": req.params.role };
-                if (req.headers.tenant && req.headers.tenant.length > 0) {
-                    query = { ...query, tenant: req.headers.tenant };
-                }
+        //no need to get site details, accounts are org wide
+        const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+        client.connect(err => {
+            if (err) {
+                client.close();
+                console.log("ERROR in put /account mongodb connect");
+                console.log(err.message, err.code);
+                res.status(500);
+                res.render('error', { error: err });
+                return;
+            }
 
-                client.db("projetkhiron").collection("accounts").find(query).toArray()
-                    .then(accounts => {
-                        if (accounts)
-                            res.json(accounts);
-                        else
-                            res.json([]);
+            var tenant = "projetkhiron";
+            if (req.headers.tenant && req.headers.tenant.length > 0) {
+                tenant = req.headers.tenant;
+            }
+
+            const { _id, firstName, lastName, role, email, phone } = req.body;
+            if (_id === '-1') { //new account
+                const { tmpPwd } = req.body;
+
+                var cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
+                var params = {
+                    UserPoolId: config.cognito.userPoolID, /* required */
+                    Username: email, /* required */
+                    DesiredDeliveryMediums: [
+                        "EMAIL",
+                    ],
+                    ForceAliasCreation: true,
+                    TemporaryPassword: tmpPwd,
+                    UserAttributes: [
+                        {
+                            Name: 'email', /* required */
+                            Value: email
+                        },
+                        {
+                            Name: 'email_verified',
+                            Value: 'true'
+                        },
+                    ],
+                };
+
+                cognitoidentityserviceprovider.adminCreateUser(params, function (err2, data) {
+                    if (err2) {
+                        client.close();
+                        console.log("ERROR in put /account cognito adminCreateUser");
+                        console.log(err2.message, err2.code);
+                        res.status(500);
+                        res.render('error', { error: err2 });
+                    } else {
+                        client.db("projetkhiron").collection("accounts").insertOne({ _id: new ObjectID(), cognitoID: data.User.Username, status: 'offline', statusDevice: 'unknown', lastSeen: new Date(), firstName: firstName, lastName: lastName, role: role, email: email, phone: phone, extra: [], paletteType: 'dark', tenant: tenant })
+                            .then(result => {
+                                res.status(200).send('Ok');
+                            })
+                            .catch(error => {
+                                console.log("ERROR in put /account mongodb insertOne");
+                                console.log(error.message, error.code);
+                                res.status(500)
+                                res.render('error', { error: error });
+                            })
+                            .finally(() => {
+                                client.close();
+                            });
+                    }
+                });
+            } else { //existing account
+                let query = { _id: new ObjectID(_id) };
+                client.db("projetkhiron").collection("accounts").updateOne(query, { $set: { firstName: firstName, lastName: lastName, role: role, email: email, phone: phone } }, { upsert: false })
+                    .then(result => {
+                        res.status(200).send('Ok');
                     })
                     .catch(error => {
-                        console.log("ERROR in get /accounts/:role mongodb find");
+                        console.log("ERROR in put /account mongodb updateOne");
                         console.log(error.message, error.code);
                         res.status(500);
                         res.render('error', { error: error });
@@ -132,92 +282,50 @@ router.get('/accounts/:role', function (req, res, next) {
                     .finally(() => {
                         client.close();
                     });
-            });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+            }
+        });
     }).catch(err => {
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
-router.put('/account', function (req, res, next) {
+router.delete('/account', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
-            const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-            client.connect(err => {
-                if (err) {
+        //no need to get site details, accounts are org wide
+        const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+        client.connect(err => {
+            if (err) {
+                client.close();
+                console.log("ERROR in delete /account mongodb connect");
+                console.log(err.message, err.code);
+                res.status(500);
+                res.render('error', { error: err });
+                return;
+            }
+
+            const { _id, cognitoID } = req.query;
+
+            var cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
+            var params = {
+                UserPoolId: config.cognito.userPoolID, /* required */
+                Username: cognitoID /* required */
+            };
+            cognitoidentityserviceprovider.adminDeleteUser(params, function (err2, data) {
+                if (err2) {
                     client.close();
-                    console.log("ERROR in put /account mongodb connect");
-                    console.log(err.message, err.code);
-                    res.status(500);
-                    res.render('error', { error: err });
+                    console.log("ERROR in delete /account cognito adminDeleteUser");
+                    console.log(err2.message, err2.code);
+                    client.close();
+                    res.status(500).render('error', { error: err2 });
                     return;
-                }
-
-                var tenant = "projetkhiron";
-                if (req.headers.tenant && req.headers.tenant.length > 0) {
-                    tenant = req.headers.tenant;
-                }
-
-                const { _id, firstName, lastName, role, email, phone } = req.body;
-                if (_id === '-1') { //new account
-                    const { tmpPwd } = req.body;
-
-                    var cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
-                    var params = {
-                        UserPoolId: config.cognito.userPoolID, /* required */
-                        Username: email, /* required */
-                        DesiredDeliveryMediums: [
-                            "EMAIL",
-                        ],
-                        ForceAliasCreation: true,
-                        TemporaryPassword: tmpPwd,
-                        UserAttributes: [
-                            {
-                                Name: 'email', /* required */
-                                Value: email
-                            },
-                            {
-                                Name: 'email_verified',
-                                Value: 'true'
-                            },
-                        ],
-                    };
-
-                    cognitoidentityserviceprovider.adminCreateUser(params, function (err2, data) {
-                        if (err2) {
-                            client.close();
-                            console.log("ERROR in put /account cognito adminCreateUser");
-                            console.log(err2.message, err2.code);
-                            res.status(500);
-                            res.render('error', { error: err2 });
-                        } else {
-                            client.db("projetkhiron").collection("accounts").insertOne({ _id: new ObjectID(), cognitoID: data.User.Username, status: 'offline', statusDevice: 'unknown', lastSeen: new Date(), firstName: firstName, lastName: lastName, role: role, email: email, phone: phone, extra: [], paletteType: 'dark', tenant: tenant })
-                                .then(result => {
-                                    res.status(200).send('Ok');
-                                })
-                                .catch(error => {
-                                    console.log("ERROR in put /account mongodb insertOne");
-                                    console.log(error.message, error.code);
-                                    res.status(500)
-                                    res.render('error', { error: error });
-                                })
-                                .finally(() => {
-                                    client.close();
-                                });
-                        }
-                    });
-                } else { //existing account
-                    let query = { _id: new ObjectID(_id) };
-                    client.db("projetkhiron").collection("accounts").updateOne(query, { $set: { firstName: firstName, lastName: lastName, role: role, email: email, phone: phone } }, { upsert: false })
+                } else {
+                    client.db("projetkhiron").collection("accounts").deleteOne({ _id: new ObjectID(_id) })
                         .then(result => {
                             res.status(200).send('Ok');
                         })
                         .catch(error => {
-                            console.log("ERROR in put /account mongodb updateOne");
+                            console.log("ERROR in delete /account mongodb deleteOne");
                             console.log(error.message, error.code);
                             res.status(500);
                             res.render('error', { error: error });
@@ -227,85 +335,23 @@ router.put('/account', function (req, res, next) {
                         });
                 }
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        });
     }).catch(err => {
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
-    })
-});
-
-router.delete('/account', function (req, res, next) {
-    userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
-            const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-            client.connect(err => {
-                if (err) {
-                    client.close();
-                    console.log("ERROR in delete /account mongodb connect");
-                    console.log(err.message, err.code);
-                    res.status(500);
-                    res.render('error', { error: err });
-                    return;
-                }
-
-                const { _id, cognitoID } = req.query;
-
-                var cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
-                var params = {
-                    UserPoolId: config.cognito.userPoolID, /* required */
-                    Username: cognitoID /* required */
-                };
-                cognitoidentityserviceprovider.adminDeleteUser(params, function (err2, data) {
-                    if (err2) {
-                        client.close();
-                        console.log("ERROR in delete /account cognito adminDeleteUser");
-                        console.log(err2.message, err2.code);
-                        client.close();
-                        res.status(500).render('error', { error: err2 });
-                        return;
-                    } else {
-                        client.db("projetkhiron").collection("accounts").deleteOne({ _id: new ObjectID(_id) })
-                            .then(result => {
-                                res.status(200).send('Ok');
-                            })
-                            .catch(error => {
-                                console.log("ERROR in delete /account mongodb deleteOne");
-                                console.log(error.message, error.code);
-                                res.status(500);
-                                res.render('error', { error: error });
-                            })
-                            .finally(() => {
-                                client.close();
-                            });
-                    }
-                });
-            });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
-    }).catch(err => {
-        res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/roles', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             let query = {};
             if (req.query.name && req.query.name.trim().length > 0) {
                 query = { name: req.query.name.trim() }
-            }
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
+            } else {
+                query = {hidden:false};
             }
 
             client.connect(err => {
@@ -317,7 +363,7 @@ router.get('/roles', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("groups").find(query).toArray(function (err2, result) {
+                client.db(siteDetails.db).collection("groups").find(query).toArray(function (err2, result) {
                     if (err2) {
                         console.log("ERROR in get /roles mongodb find");
                         console.log(err2.message, err2.code);
@@ -329,19 +375,21 @@ router.get('/roles', function (req, res, next) {
                     client.close();
                 });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/roles', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
             client.connect(err => {
                 if (err) {
@@ -352,13 +400,10 @@ router.put('/roles', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                var tenant = "projetkhiron";
-                if (req.headers.tenant && req.headers.tenant.length > 0) {
-                    tenant = req.headers.tenant;
-                }
+
                 let searchID = new ObjectID(req.body._id);
                 delete req.body._id;
-                client.db(tenant).collection("groups").replaceOne({ _id: searchID }, req.body)
+                client.db(siteDetails.db).collection("groups").replaceOne({ _id: searchID }, req.body)
                     .then(result => {
                         res.json(result);
                     })
@@ -372,29 +417,26 @@ router.put('/roles', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/roles/settings', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             let query = {};
             if (req.body.name && req.body.name.trim().length > 0) {
                 query = { name: req.body.name.trim() }
-            }
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
             }
 
             client.connect(err => {
@@ -407,8 +449,7 @@ router.put('/roles/settings', function (req, res, next) {
                     return;
                 }
 
-
-                client.db(tenant).collection("groups").updateOne(query, { $set: { settings: req.body.settings } }, { upsert: false })
+                client.db(siteDetails.db).collection("groups").updateOne(query, { $set: { settings: req.body.settings } }, { upsert: false })
                     .then(result => {
                         res.json(result);
                     })
@@ -422,29 +463,26 @@ router.put('/roles/settings', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/roles/options', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             let query = {};
             if (req.body.name && req.body.name.trim().length > 0) {
                 query = { name: req.body.name.trim() }
-            }
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
             }
 
             client.connect(err => {
@@ -456,7 +494,7 @@ router.put('/roles/options', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("groups").updateOne(query, { $set: { label: req.body.label, "settings.options": req.body.options } }, { upsert: false })
+                client.db(siteDetails.db).collection("groups").updateOne(query, { $set: { label: req.body.label, "settings.options": req.body.options } }, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -470,44 +508,123 @@ router.put('/roles/options', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/heartbeat', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        //no need to get site details, accounts are org wide
+        const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+        let query = {};
+        if (req.body.userId && req.body.userId.trim().length > 0) {
+            query = { _id: new ObjectID(req.body.userId.trim()) }
+        }
+        var statusDevice = 'unknown';
+        if (req.body.statusDevice && req.body.statusDevice.trim().length > 0) {
+            statusDevice = req.body.statusDevice;
+        }
+
+        client.connect(err => {
+            if (err) {
+                client.close();
+                console.log("ERROR in put /heartbeat mongodb connect");
+                console.log(err.message, err.code);
+                res.status(500);
+                res.render('error', { error: err });
+                return;
+            }
+            client.db("projetkhiron").collection("accounts").updateOne(query, { $set: { lastSeen: new Date(req.body.date), status: req.body.status, statusDevice: statusDevice } }, { upsert: false })
+                .then(result => {
+                    res.status(200).send('Ok');
+                })
+                .catch(error => {
+                    console.log("ERROR in put /heartbeat mongodb updateOne");
+                    console.log(error.message, error.code);
+                    res.status(500);
+                    res.render('error', { error: error });
+                })
+                .finally(() => {
+                    client.close();
+                });
+        });
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
+    })
+});
+
+router.get('/floors', function (req, res, next) {
+    userAccessAuthorized(req).then(isAuthorized => {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-            let query = {};
-            if (req.body.userId && req.body.userId.trim().length > 0) {
-                query = { _id: new ObjectID(req.body.userId.trim()) }
-            }
-            var statusDevice = 'unknown';
-            if (req.body.statusDevice && req.body.statusDevice.trim().length > 0) {
-                statusDevice = req.body.statusDevice;
-            }
 
             client.connect(err => {
                 if (err) {
                     client.close();
-                    console.log("ERROR in put /heartbeat mongodb connect");
+                    console.log("ERROR in get /floors mongodb connect");
                     console.log(err.message, err.code);
                     res.status(500);
                     res.render('error', { error: err });
                     return;
                 }
-                client.db("projetkhiron").collection("accounts").updateOne(query, { $set: { lastSeen: new Date(req.body.date), status: req.body.status, statusDevice: statusDevice } }, { upsert: false })
+                client.db(siteDetails.db).collection("floors").find({}).sort({ label: 1 }).toArray(function (err2, result) {
+                    if (err2) {
+                        console.log("ERROR in get /floors mongodb find");
+                        console.log(err2.message, err2.code);
+                        res.status(500);
+                        res.render('error', { error: err2 });
+                    } else {
+                        res.json(result);
+                    }
+                    client.close();
+                });
+            });
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
+    })
+});
+
+router.get('/floor/:id', function (req, res, next) {
+    userAccessAuthorized(req).then(isAuthorized => {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
+            const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+
+            client.connect(err => {
+                if (err) {
+                    client.close();
+                    console.log("ERROR in get /floor/:id mongodb connect");
+                    console.log(err.message, err.code);
+                    res.status(500);
+                    res.render('error', { error: err });
+                    return;
+                }
+                var o_id = new mongo.ObjectID(req.params.id);
+                client.db(siteDetails.db).collection("floors").findOne({ _id: o_id })
                     .then(result => {
-                        res.status(200).send('Ok');
+                        if (result)
+                            res.json(result);
+                        else
+                            res.json([]);
                     })
                     .catch(error => {
-                        console.log("ERROR in put /heartbeat mongodb updateOne");
+                        console.log("ERROR in get /floor/:id mongodb findOne");
                         console.log(error.message, error.code);
                         res.status(500);
                         res.render('error', { error: error });
@@ -516,91 +633,23 @@ router.put('/heartbeat', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
-    }).catch(err => {
-        res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
-    })
-});
-
-router.get('/floors', function (req, res, next) {
-    //TODO:need access token for public requests
-
-    const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-    var tenant = "projetkhiron";
-    if (req.headers.tenant && req.headers.tenant.length > 0) {
-        tenant = req.headers.tenant;
-    }
-    client.connect(err => {
-        if (err) {
-            client.close();
-            console.log("ERROR in get /floors mongodb connect");
-            console.log(err.message, err.code);
-            res.status(500);
-            res.render('error', { error: err });
-            return;
-        }
-        client.db(tenant).collection("floors").find({}).sort({ label: 1 }).toArray(function (err2, result) {
-            if (err2) {
-                console.log("ERROR in get /floors mongodb find");
-                console.log(err2.message, err2.code);
-                res.status(500);
-                res.render('error', { error: err2 });
-            } else {
-                res.json(result);
-            }
-            client.close();
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
         });
-    });
-});
-
-router.get('/floor/:id', function (req, res, next) {
-    //TODO:need access token verification for public requests
-    const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-    var tenant = "projetkhiron";
-    if (req.headers.tenant && req.headers.tenant.length > 0) {
-        tenant = req.headers.tenant;
-    }
-    client.connect(err => {
-        if (err) {
-            client.close();
-            console.log("ERROR in get /floor/:id mongodb connect");
-            console.log(err.message, err.code);
-            res.status(500);
-            res.render('error', { error: err });
-            return;
-        }
-        var o_id = new mongo.ObjectID(req.params.id);
-        client.db(tenant).collection("floors").findOne({ _id: o_id })
-            .then(result => {
-                if (result)
-                    res.json(result);
-                else
-                    res.json([]);
-            })
-            .catch(error => {
-                console.log("ERROR in get /floor/:id mongodb findOne");
-                console.log(error.message, error.code);
-                res.status(500);
-                res.render('error', { error: error });
-            })
-            .finally(() => {
-                client.close();
-            });
-    });
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
+    })
 });
 
 router.delete('/floor/:id', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
+
             client.connect(err => {
                 if (err) {
                     client.close();
@@ -611,7 +660,7 @@ router.delete('/floor/:id', function (req, res, next) {
                     return;
                 }
                 var o_id = new mongo.ObjectID(req.params.id);
-                client.db(tenant).collection("floors").remove({ _id: o_id })
+                client.db(siteDetails.db).collection("floors").remove({ _id: o_id })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -625,24 +674,23 @@ router.delete('/floor/:id', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/floor', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
+
             if (req.body._id === "-1") { //new floor
                 client.connect(err => {
                     if (err) {
@@ -654,7 +702,7 @@ router.put('/floor', function (req, res, next) {
                         return;
                     }
                     delete req.body._id;
-                    client.db(tenant).collection("floors").insertOne(req.body)
+                    client.db(siteDetails.db).collection("floors").insertOne(req.body)
                         .then(result => {
                             res.status(200).json({ insertedId: result.insertedId });
                         })
@@ -680,7 +728,7 @@ router.put('/floor', function (req, res, next) {
                     }
                     let searchID = new ObjectID(req.body._id);
                     delete req.body._id;
-                    client.db(tenant).collection("floors").replaceOne({ _id: searchID }, req.body)
+                    client.db(siteDetails.db).collection("floors").replaceOne({ _id: searchID }, req.body)
                         .then(result => {
                             res.status(200).send('Ok');
                         })
@@ -695,25 +743,22 @@ router.put('/floor', function (req, res, next) {
                         });
                 });
             }
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/beds/:id', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
-            //if(req.params.id && req.params.id.trim().length === 12 ) { //ObjectId is a single String of 12 bytes, anything else means a uuid for a new object.
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
+
             client.connect(err => {
                 if (err) {
                     client.close();
@@ -723,7 +768,7 @@ router.get('/beds/:id', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("beds").findOne({ parent: req.params.id })
+                client.db(siteDetails.db).collection("beds").findOne({ parent: req.params.id })
                     .then(result => {
                         if (result)
                             res.json(result.beds);
@@ -740,22 +785,21 @@ router.get('/beds/:id', function (req, res, next) {
                         client.close();
                     });
             });
-            // } else {
-            //     res.status(200).send('Ok');
-            // }
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/bearer/requests', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             let query = {};
@@ -773,10 +817,7 @@ router.get('/bearer/requests', function (req, res, next) {
                     }
                 }
             }
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
+
             client.connect(err => {
                 if (err) {
                     client.close();
@@ -787,7 +828,7 @@ router.get('/bearer/requests', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("bearerRequests").find(query).sort({ requestedOn: -1 }).toArray(function (err2, result) {
+                client.db(siteDetails.db).collection("bearerRequests").find(query).sort({ requestedOn: -1 }).toArray(function (err2, result) {
                     if (err2) {
                         console.log("ERROR in get /bearer/requests mongodb find");
                         console.log(err2.message, err2.code);
@@ -799,19 +840,21 @@ router.get('/bearer/requests', function (req, res, next) {
                     client.close();
                 });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/cleaner/requests', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
             let query = {};
             if (req.query.from && req.query.from.trim().length > 0 && !req.query.to) {
@@ -828,10 +871,7 @@ router.get('/cleaner/requests', function (req, res, next) {
                     }
                 }
             }
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
+
             client.connect(err => {
                 if (err) {
                     client.close();
@@ -842,7 +882,7 @@ router.get('/cleaner/requests', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("cleanerRequests").find(query).sort({ requestedOn: -1 }).toArray(function (err2, result) {
+                client.db(siteDetails.db).collection("cleanerRequests").find(query).sort({ requestedOn: -1 }).toArray(function (err2, result) {
                     if (err2) {
                         console.log("ERROR in get /cleaner/requests mongodb find");
                         console.log(err2.message, err2.code);
@@ -854,25 +894,22 @@ router.get('/cleaner/requests', function (req, res, next) {
                     client.close();
                 });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/bearer/requests/stats', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             client.connect(err => {
                 if (err) {
@@ -884,7 +921,7 @@ router.get('/bearer/requests/stats', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("bearerRequestsStats").findOne({ type: req.query.type })
+                client.db(siteDetails.db).collection("bearerRequestsStats").findOne({ type: req.query.type })
                     .then(result => {
                         if (result)
                             res.json(result.data);
@@ -901,25 +938,22 @@ router.get('/bearer/requests/stats', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/cleaner/requests/stats', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             client.connect(err => {
                 if (err) {
@@ -931,7 +965,7 @@ router.get('/cleaner/requests/stats', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("cleanerRequestsStats").findOne({ type: req.query.type })
+                client.db(siteDetails.db).collection("cleanerRequestsStats").findOne({ type: req.query.type })
                     .then(result => {
                         if (result)
                             res.json(result.data);
@@ -948,13 +982,15 @@ router.get('/cleaner/requests/stats', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
@@ -974,93 +1010,84 @@ const getBearerToAssignNewRequest = (req) => {
 
 router.put('/bearer/request', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
-            if (req.headers.tenant && req.headers.tenant.length > 0){ 
-                const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-                var tenant = req.headers.tenant;
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
+            const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
-                client.connect(err => {
-                    if (err) {
+            client.connect(err => {
+                if (err) {
+                    client.close();
+                    console.log("ERROR in put /bearer/request mongodb connect");
+                    console.log(err.message, err.code);
+                    res.status(500);
+                    res.render('error', { error: err });
+                    return;
+                }
+
+                client.db(siteDetails.db).collection("systemSettings").find({ config: "production" }).toArray(function (err2, settings) {
+                    if (err2) {
                         client.close();
-                        console.log("ERROR in put /bearer/request mongodb connect");
-                        console.log(err.message, err.code);
+                        console.log("ERROR in put /bearer/request mongodb find");
+                        console.log(err2.message, err2.code);
                         res.status(500);
-                        res.render('error', { error: err });
-                        return;
+                        res.render('error', { error: err2 });
+                    } else {
+                        const { from, to, requestedOn, options } = req.body;
+
+                        client.db(siteDetails.db).collection("bearerRequests").insertOne({ _id: new ObjectID(), from, to, options: options, assigned: null, requestedOn: new Date(requestedOn), assignedOn: new Date(0), completedOn: new Date(0) })
+                            .then(result => {
+                                let notifMasg = {
+                                    "default": "Default Demande de Brancarderie",
+                                    "APNS_SANDBOX": "{\"aps\" : {\"content-available\":1}, \"type\":\"bearer\", \"tenant\":\"" + tenant + "\", \"title\" : \"Demande Brancarderie\",\"body\" : \"De " + from.label + " vers " + to.label + "\"}",
+                                    "APNS": "{\"aps\" : {\"content-available\":1}, \"type\":\"bearer\", \"tenant\":\"" + tenant + "\", \"title\" : \"Demande Brancarderie\",\"body\" : \"De " + from.label + " vers " + to.label + "\"}",
+                                    "GCM": "{ \"data\": { \"type\":\"bearer\", \"tenant\":\"" + tenant + "\", \"title\" : \"Demande Brancarderie\",\"body\" : \"De " + from.label + " vers " + to.label + "\"} }",
+                                };
+                                var params = {
+                                    Message: JSON.stringify(notifMasg),
+                                    MessageStructure: 'json',
+                                    TopicArn: settings[0].notif.bearer,
+                                };
+
+                                // Create promise and SNS service object
+                                var publishTextPromise = new AWS.SNS().publish(params).promise();
+
+                                // Handle promise's fulfilled/rejected states
+                                publishTextPromise.then(
+                                    function (data) {
+                                        res.status(200).send('Ok');
+                                    }).catch(error => {
+                                        console.log("ERROR in put /bearer/request SNS publish");
+                                        console.log(error.message, error.code);
+                                        res.status(500);
+                                        res.render('error', { error: error });
+                                    });
+                            })
+                            .catch(error => {
+                                console.log("ERROR in put /bearer/request mongodb insertOne");
+                                console.log(error.message, error.code);
+                                res.status(500);
+                                res.render('error', { error: error });
+                            }).finally(() => {
+                                client.close();
+                            });
                     }
-
-                    client.db(tenant).collection("systemSettings").find({ config: "production" }).toArray(function (err2, settings) {
-                        if (err2) {
-                            client.close();
-                            console.log("ERROR in put /bearer/request mongodb find");
-                            console.log(err2.message, err2.code);
-                            res.status(500);
-                            res.render('error', { error: err2 });
-                        } else {
-                            const { from, to, requestedOn, options } = req.body;
-
-                            client.db(tenant).collection("bearerRequests").insertOne({ _id: new ObjectID(), from, to, options: options, assigned: null, requestedOn: new Date(requestedOn), assignedOn: new Date(0), completedOn: new Date(0) })
-                                .then(result => {
-                                    let notifMasg = {
-                                        "default": "Default Demande de Brancarderie",
-                                        "APNS_SANDBOX": "{\"aps\" : {\"content-available\":1}, \"type\":\"bearer\", \"tenant\":\"" + tenant + "\", \"title\" : \"Demande Brancarderie\",\"body\" : \"De " + from.label + " vers " + to.label + "\"}",
-                                        "APNS": "{\"aps\" : {\"content-available\":1}, \"type\":\"bearer\", \"tenant\":\"" + tenant + "\", \"title\" : \"Demande Brancarderie\",\"body\" : \"De " + from.label + " vers " + to.label + "\"}",
-                                        "GCM": "{ \"data\": { \"type\":\"bearer\", \"tenant\":\"" + tenant + "\", \"title\" : \"Demande Brancarderie\",\"body\" : \"De " + from.label + " vers " + to.label + "\"} }",
-                                    };
-                                    var params = {
-                                        Message: JSON.stringify(notifMasg),
-                                        MessageStructure: 'json',
-                                        TopicArn: settings[0].notif.bearer,
-                                    };
-
-                                    // Create promise and SNS service object
-                                    var publishTextPromise = new AWS.SNS().publish(params).promise();
-
-                                    // Handle promise's fulfilled/rejected states
-                                    publishTextPromise.then(
-                                        function (data) {
-                                            res.status(200).send('Ok');
-                                        }).catch(error => {
-                                            console.log("ERROR in put /bearer/request SNS publish");
-                                            console.log(error.message, error.code);
-                                            res.status(500);
-                                            res.render('error', { error: error });
-                                        });
-                                })
-                                .catch(error => {
-                                    console.log("ERROR in put /bearer/request mongodb insertOne");
-                                    console.log(error.message, error.code);
-                                    res.status(500);
-                                    res.render('error', { error: error });
-                                }).finally(() => {
-                                    client.close();
-                                });
-                        }
-                    });
                 });
-            } else {
-                res.status(403);
-                res.render('error', { error: { message: 'Access denied', code: 403 } });
-            }
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+            });
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/cleaner/request', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             client.connect(err => {
                 if (err) {
@@ -1072,7 +1099,7 @@ router.put('/cleaner/request', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("systemSettings").find({ config: "production" }).toArray(function (err2, settings) {
+                client.db(siteDetails.db).collection("systemSettings").find({ config: "production" }).toArray(function (err2, settings) {
                     if (err2) {
                         console.log("ERROR in put /cleaner/request mongodb find");
                         console.log(err2.message, err2.code);
@@ -1082,7 +1109,7 @@ router.put('/cleaner/request', function (req, res, next) {
                     } else {
                         const { from, requestedOn, options } = req.body;
 
-                        client.db(tenant).collection("cleanerRequests").insertOne({ _id: new ObjectID(), from, options: options, assigned: null, requestedOn: new Date(requestedOn), assignedOn: new Date(0), completedOn: new Date(0) })
+                        client.db(siteDetails.db).collection("cleanerRequests").insertOne({ _id: new ObjectID(), from, options: options, assigned: null, requestedOn: new Date(requestedOn), assignedOn: new Date(0), completedOn: new Date(0) })
                             .then(result => {
                                 let notifMasg = {
                                     "default": "Default Demande de Nettoyage et salubrité",
@@ -1121,25 +1148,22 @@ router.put('/cleaner/request', function (req, res, next) {
                     }
                 });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/bearer/request/accept', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             const { requestId, userId, userLabel, assignedOn } = req.body;
 
@@ -1154,7 +1178,7 @@ router.put('/bearer/request/accept', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("bearerRequests").updateOne(query, { $set: { assigned: { _id: new ObjectID(userId), label: userLabel }, assignedOn: new Date(assignedOn) } }, { upsert: false })
+                client.db(siteDetails.db).collection("bearerRequests").updateOne(query, { $set: { assigned: { _id: new ObjectID(userId), label: userLabel }, assignedOn: new Date(assignedOn) } }, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -1168,29 +1192,26 @@ router.put('/bearer/request/accept', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/serviceLevel', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             const { serviceLevel, forGroup } = req.body;
 
             let query = { name: forGroup };
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             client.connect(err => {
                 if (err) {
@@ -1201,7 +1222,7 @@ router.put('/serviceLevel', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("groups").updateOne(query, { $set: { "settings.serviceLevel": serviceLevel } }, { upsert: false })
+                client.db(siteDetails.db).collection("groups").updateOne(query, { $set: { "settings.serviceLevel": serviceLevel } }, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -1215,25 +1236,22 @@ router.put('/serviceLevel', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/cleaner/request/accept', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             const { requestId, userId, userLabel, assignedOn } = req.body;
 
@@ -1248,7 +1266,7 @@ router.put('/cleaner/request/accept', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("cleanerRequests").updateOne(query, { $set: { assigned: { _id: new ObjectID(userId), label: userLabel }, assignedOn: new Date(assignedOn) } }, { upsert: false })
+                client.db(siteDetails.db).collection("cleanerRequests").updateOne(query, { $set: { assigned: { _id: new ObjectID(userId), label: userLabel }, assignedOn: new Date(assignedOn) } }, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -1262,25 +1280,22 @@ router.put('/cleaner/request/accept', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/bearer/request/completed', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             const { requestId, completedOn } = req.body;
 
@@ -1295,7 +1310,7 @@ router.put('/bearer/request/completed', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("bearerRequests").updateOne(query, { $set: { completedOn: new Date(completedOn) } }, { upsert: false })
+                client.db(siteDetails.db).collection("bearerRequests").updateOne(query, { $set: { completedOn: new Date(completedOn) } }, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -1309,25 +1324,22 @@ router.put('/bearer/request/completed', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/cleaner/request/completed', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             const { requestId, completedOn } = req.body;
 
@@ -1342,7 +1354,7 @@ router.put('/cleaner/request/completed', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("cleanerRequests").updateOne(query, { $set: { completedOn: new Date(completedOn) } }, { upsert: false })
+                client.db(siteDetails.db).collection("cleanerRequests").updateOne(query, { $set: { completedOn: new Date(completedOn) } }, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -1356,63 +1368,71 @@ router.put('/cleaner/request/completed', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/settings', function (req, res, next) {
-    //TODO:need access token
-    const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    userAccessAuthorized(req).then(isAuthorized => {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
+            const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
-    let query = {};
-    if (req.query.config && req.query.config.trim().length > 0) {
-        query = { config: req.query.config.trim() }
-    }
-
-    var tenant = "projetkhiron";
-    if (req.headers.tenant && req.headers.tenant.length > 0) {
-        tenant = req.headers.tenant;
-    }
-
-    client.connect(err => {
-        if (err) {
-            client.close();
-            console.log("ERROR in get /settings mongodb connect");
-            console.log(err.message, err.code);
-            res.status(500);
-            res.render('error', { error: err });
-            return;
-        }
-        client.db(tenant).collection("systemSettings").find(query).toArray(function (err2, result) {
-            if (err2) {
-                console.log("ERROR in get /settings mongodb find");
-                console.log(err2.message, err2.code);
-                res.status(500);
-                res.render('error', { error: err2 });
-            } else {
-                res.json(result);
+            let query = {};
+            if (req.query.config && req.query.config.trim().length > 0) {
+                query = { config: req.query.config.trim() }
             }
-            client.close();
+
+            client.connect(err => {
+                if (err) {
+                    client.close();
+                    console.log("ERROR in get /settings mongodb connect");
+                    console.log(err.message, err.code);
+                    res.status(500);
+                    res.render('error', { error: err });
+                    return;
+                }
+                client.db(siteDetails.db).collection("systemSettings").find(query).toArray(function (err2, result) {
+                    if (err2) {
+                        console.log("ERROR in get /settings mongodb find");
+                        console.log(err2.message, err2.code);
+                        res.status(500);
+                        res.render('error', { error: err2 });
+                    } else {
+                        res.json(result);
+                    }
+                    client.close();
+                });
+            });
+
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
         });
-    });
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
+    })
 });
 
 router.post('/settings/licence', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (req.headers.tenant && req.headers.tenant.length > 0) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             let query = {};
             if (req.body.config && req.body.config.trim().length > 0) {
                 query = { config: req.body.config.trim() }
             }
-            var tenant = req.headers.tenant;
 
             if(req.body.licence){
                 readLicence(req.body.licence).then(data => {
@@ -1435,7 +1455,7 @@ router.post('/settings/licence', function (req, res, next) {
                         res.render('error', { error: err });
                         return;
                     }
-                    client.db(tenant).collection("systemSettings").find(query).toArray(function (err2, result) {
+                    client.db(siteDetails.db).collection("systemSettings").find(query).toArray(function (err2, result) {
                         if (err2) {
                             console.log("ERROR in get /settings/licence mongodb find");
                             console.log(err2.message, err2.code);
@@ -1449,22 +1469,24 @@ router.post('/settings/licence', function (req, res, next) {
                                 const publicKey = nacl.util.decodeBase64(config.licence.pubKey);
                                 const licenceJson = nacl.sign.open(dataMsg, publicKey);
                                 res.json(JSON.parse(txtDecoder.decode(licenceJson)));
-                            }).catch(err => {
+                            }).catch(err3 => {
+                                console.log(err3)
                                 res.status(500);
-                                res.render('error', { error: err });
+                                res.render('error', { error: err3 });
                             })
                         }
                         client.close();
                     });
                 });
             }
-        } else {
-            res.status(404);
-            res.render('error', { error: {message:'not found', code:404}});
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
@@ -1489,18 +1511,13 @@ async function readLicence(licenceFile) {
 
 router.put('/settings', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             const { settings } = req.body;
 
             let query = { _id: new ObjectID(settings._id) };
             delete settings._id;
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             client.connect(err => {
                 if (err) {
@@ -1511,7 +1528,7 @@ router.put('/settings', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("systemSettings").replaceOne(query, settings, { upsert: false })
+                client.db(siteDetails.db).collection("systemSettings").replaceOne(query, settings, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -1525,19 +1542,21 @@ router.put('/settings', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/bearer/analysis', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             let query = {};
@@ -1547,11 +1566,6 @@ router.get('/bearer/analysis', function (req, res, next) {
                 var beforeDate = new Date(new Date().getTime() - (parseInt(req.query.seviceLevel) * MS_PER_MINUTE));
 
                 query = { requestedOn: { $lte: beforeDate }, completedOn: { $eq: new Date(0) } }
-            }
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
             }
 
             client.connect(err => {
@@ -1564,7 +1578,7 @@ router.get('/bearer/analysis', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("bearerRequests").find(query).sort({ requestedOn: 1 }).toArray(function (err2, result) {
+                client.db(siteDetails.db).collection("bearerRequests").find(query).sort({ requestedOn: 1 }).toArray(function (err2, result) {
                     if (err2) {
                         console.log("ERROR in get /bearer/analysiss mongodb find");
                         console.log(err2.message, err2.code);
@@ -1576,19 +1590,21 @@ router.get('/bearer/analysis', function (req, res, next) {
                     client.close();
                 });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/cleaner/analysis', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
             let query = {};
@@ -1598,11 +1614,6 @@ router.get('/cleaner/analysis', function (req, res, next) {
                 var beforeDate = new Date(new Date().getTime() - (parseInt(req.query.seviceLevel) * MS_PER_MINUTE));
 
                 query = { requestedOn: { $lte: beforeDate }, completedOn: { $eq: new Date(0) } }
-            }
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
             }
 
             client.connect(err => {
@@ -1615,7 +1626,7 @@ router.get('/cleaner/analysis', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("cleanerRequests").find(query).sort({ requestedOn: 1 }).toArray(function (err2, result) {
+                client.db(siteDetails.db).collection("cleanerRequests").find(query).sort({ requestedOn: 1 }).toArray(function (err2, result) {
                     if (err2) {
                         console.log("ERROR in get /cleaner/analysiss mongodb find");
                         console.log(err2.message, err2.code);
@@ -1627,19 +1638,21 @@ router.get('/cleaner/analysis', function (req, res, next) {
                     client.close();
                 });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/visitor/requests', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
             let query = {};
             if (req.query.from && req.query.from.trim().length > 0 && !req.query.to) {
@@ -1657,11 +1670,6 @@ router.get('/visitor/requests', function (req, res, next) {
                 }
             }
 
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
-
             client.connect(err => {
                 if (err) {
                     client.close();
@@ -1672,7 +1680,7 @@ router.get('/visitor/requests', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("visitorRequests").find(query).sort({ requestedOn: -1 }).toArray(function (err2, result) {
+                client.db(siteDetails.db).collection("visitorRequests").find(query).sort({ requestedOn: -1 }).toArray(function (err2, result) {
                     if (err2) {
                         console.log("ERROR in get /visitor/requests mongodb find");
                         console.log(err2.message, err2.code);
@@ -1684,62 +1692,60 @@ router.get('/visitor/requests', function (req, res, next) {
                     client.close();
                 });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/visitor/requests', function (req, res, next) {
-    //TODO:need access token
-    const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    //TODO access key/token
+    getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
+        const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
-    var tenant = "projetkhiron";
-    if (req.headers.tenant && req.headers.tenant.length > 0) {
-        tenant = req.headers.tenant;
-    }
-
-    client.connect(err => {
-        if (err) {
-            client.close();
-            console.log("ERROR in put /visitor/requests mongodb connect");
-            console.log(err.message, err.code);
-            res.status(500);
-            res.render('error', { error: err });
-            return;
-        }
-
-        const { requestFor, requestedOn, options } = req.body;
-
-        client.db(tenant).collection("visitorRequests").insertOne({ _id: new ObjectID(), requestFor: requestFor, requestedOn: new Date(requestedOn), options: options })
-            .then(result => {
-                res.status(200).send('Ok');
-            })
-            .catch(error => {
-                console.log("ERROR in get /visitor/requests mongodb insertOne");
-                console.log(error.message, error.code);
-                res.status(500);
-                res.render('error', { error: error });
-            })
-            .finally(() => {
+        client.connect(err => {
+            if (err) {
                 client.close();
-            });
+                console.log("ERROR in put /visitor/requests mongodb connect");
+                console.log(err.message, err.code);
+                res.status(500);
+                res.render('error', { error: err });
+                return;
+            }
+
+            const { requestFor, requestedOn, options } = req.body;
+
+            client.db(siteDetails.db).collection("visitorRequests").insertOne({ _id: new ObjectID(), requestFor: requestFor, requestedOn: new Date(requestedOn), options: options })
+                .then(result => {
+                    res.status(200).send('Ok');
+                })
+                .catch(error => {
+                    console.log("ERROR in get /visitor/requests mongodb insertOne");
+                    console.log(error.message, error.code);
+                    res.status(500);
+                    res.render('error', { error: error });
+                })
+                .finally(() => {
+                    client.close();
+                });
+        });
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     });
 });
 
 router.get('/visitor/requests/stats', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             client.connect(err => {
                 if (err) {
@@ -1751,7 +1757,7 @@ router.get('/visitor/requests/stats', function (req, res, next) {
                     return;
                 }
 
-                client.db(tenant).collection("visitorRequestsStats").findOne({ type: req.query.type })
+                client.db(siteDetails.db).collection("visitorRequestsStats").findOne({ type: req.query.type })
                     .then(result => {
                         if (result)
                             res.json(result.data);
@@ -1768,25 +1774,22 @@ router.get('/visitor/requests/stats', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.put('/visitor/settings', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
 
             let query = { config: "production" }
 
@@ -1799,7 +1802,7 @@ router.put('/visitor/settings', function (req, res, next) {
                     res.render('error', { error: err });
                     return;
                 }
-                client.db(tenant).collection("systemSettings").updateOne(query, { $set: { "visitor.settings": req.body.settings } }, { upsert: false })
+                client.db(siteDetails.db).collection("systemSettings").updateOne(query, { $set: { "visitor.settings": req.body.settings } }, { upsert: false })
                     .then(result => {
                         res.status(200).send('Ok');
                     })
@@ -1813,53 +1816,60 @@ router.put('/visitor/settings', function (req, res, next) {
                         client.close();
                     });
             });
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
 router.get('/visitor/settings', function (req, res, next) {
-    //TODO:naccess token
-    const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-    if (req.headers.tenant && req.headers.tenant.length > 0) {
-        var tenant = req.headers.tenant;
-        let query = { config: "production" }
+    userAccessAuthorized(req).then(isAuthorized => {
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
+        const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+            let query = { config: "production" }
 
-        client.connect(err => {
-            if (err) {
-                client.close();
-                console.log("ERROR in get /visitor/settings mongodb connect");
-                console.log(err.message, err.code);
-                res.status(500);
-                res.render('error', { error: err });
-                return;
-            }
-            client.db(tenant).collection("systemSettings").find(query).toArray(function (err2, result) {
-                if (err2) {
-                    console.log("ERROR in get /visitor/settings mongodb find");
-                    console.log(err2.message, err2.code);
+            client.connect(err => {
+                if (err) {
+                    client.close();
+                    console.log("ERROR in get /visitor/settings mongodb connect");
+                    console.log(err.message, err.code);
                     res.status(500);
-                    res.render('error', { error: err2 });
-                } else {
-                    if(result && result.length > 0) {
-                        res.json({ settings: { ...result[0].visitor.settings } });
-                    } else {
-                        res.status(404);
-                        res.render('error', { error: {message:'not found', code:404}});
-                    }
+                    res.render('error', { error: err });
+                    return;
                 }
-                client.close();
-            })
+                client.db(siteDetails.db).collection("systemSettings").find(query).toArray(function (err2, result) {
+                    if (err2) {
+                        console.log("ERROR in get /visitor/settings mongodb find");
+                        console.log(err2.message, err2.code);
+                        res.status(500);
+                        res.render('error', { error: err2 });
+                    } else {
+                        if(result && result.length > 0) {
+                            res.json({ settings: { ...result[0].visitor.settings } });
+                        } else {
+                            res.status(404);
+                            res.render('error', { error: {message:'not found', code:404}});
+                        }
+                    }
+                    client.close();
+                })
+            });
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
         });
-    } else {
-        res.status(404);
-        res.render('error', { error: {message:'not found', code:404}});
-    }
+    }).catch(err => {
+        console.log(err);
+        res.status(403);
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
+    })
 });
 
 const generateInitialSearchPipeline = (options) => {
@@ -1915,12 +1925,7 @@ const generateInitialSearchPipeline = (options) => {
 
 router.post('/requests/search', function (req, res, next) {
     userAccessAuthorized(req).then(isAuthorized => {
-        if (isAuthorized) {
-            var tenant = "projetkhiron";
-            if (req.headers.tenant && req.headers.tenant.length > 0) {
-                tenant = req.headers.tenant;
-            }
-
+        getSiteDetailsSiteID(req.headers.site).then(siteDetails => {
             const { floorID, sectionID, bedID, visitorOptions, bearerOptions, cleanerOptions, fromDate, toDate, searchVisitor, searchBearer, searchCleaner } = req.body;
 
             (async () => {
@@ -1950,7 +1955,7 @@ router.post('/requests/search', function (req, res, next) {
 
                     visitorPipelineStages.push({ $match: { requestedOn: { $lte: new Date(toDate), $gte: new Date(fromDate) } } });
 
-                    promises.push(client.db(tenant).collection("visitorRequests").aggregate(visitorPipelineStages).toArray());
+                    promises.push(client.db(siteDetails.db).collection("visitorRequests").aggregate(visitorPipelineStages).toArray());
 
                     currentPromiseIdx = currentPromiseIdx + 1;
                     visitorPromiseIdx = currentPromiseIdx;
@@ -1988,7 +1993,7 @@ router.post('/requests/search', function (req, res, next) {
 
                     bearerPipelineStages.push({ $match: { completedOn: { $lte: new Date(toDate), $gte: new Date(fromDate) } } });
 
-                    promises.push(client.db(tenant).collection("bearerRequests").aggregate(bearerPipelineStages).toArray());
+                    promises.push(client.db(siteDetails.db).collection("bearerRequests").aggregate(bearerPipelineStages).toArray());
 
                     currentPromiseIdx = currentPromiseIdx + 1;
                     bearerPromiseIdx = currentPromiseIdx;
@@ -2026,7 +2031,7 @@ router.post('/requests/search', function (req, res, next) {
 
                     cleanerPipelineStages.push({ $match: { completedOn: { $lte: new Date(toDate), $gte: new Date(fromDate) } } });
 
-                    promises.push(client.db(tenant).collection("cleanerRequests").aggregate(cleanerPipelineStages).toArray());
+                    promises.push(client.db(siteDetails.db).collection("cleanerRequests").aggregate(cleanerPipelineStages).toArray());
 
                     currentPromiseIdx = currentPromiseIdx + 1;
                     cleanerPromiseIdx = currentPromiseIdx;
@@ -2089,13 +2094,15 @@ router.post('/requests/search', function (req, res, next) {
                     res.status(500);
                     res.render('error', { error: error });
                 })
-        } else {
-            res.status(403);
-            res.render('error', { error: { message: 'Access denied', code: 403 } });
-        }
+        }).catch(err => {
+            console.log(err);
+            res.status(400);
+            res.render('error', { error: { message: "Missing parameter", code: 400 } });
+        });
     }).catch(err => {
+        console.log(err);
         res.status(403);
-        res.render('error', { error: { message: 'Access denied', code: 403 } });
+        res.render('error', { error: { message: 'Access not authorized', code: 403 } });
     })
 });
 
