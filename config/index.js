@@ -3,7 +3,11 @@ module.exports = {
 		port: process.env.SERVER_PORT
 	},
 	database: {
-		connectionstring: process.env.DATABASE_CONNECTIONSTRING
+		connectionstring: process.env.DATABASE_CONNECTIONSTRING,
+		groupid: process.env.DATABASE_GROUPID,
+		publicKey:process.env.DATABASE_PUBLIC_KEY,
+		privateKey:process.env.DATABASE_PRIVATE_KEY,
+		cluster:process.env.DATABASE_CLUSTER,
 	},
 	host:{
 		cors: process.env.CORS_ORIGIN
